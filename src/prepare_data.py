@@ -6,14 +6,8 @@ import nltk
 import pandas as pd
 import torch
 
-from nltk.sentiment.vader import (
-    SentimentIntensityAnalyzer,
-)
-
-from transformers import (
-    AutoTokenizer,
-    AutoModel,
-)
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from transformers import AutoTokenizer,AutoModel
 
 from tqdm import tqdm
 

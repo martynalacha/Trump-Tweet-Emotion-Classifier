@@ -2,12 +2,7 @@ import torch
 import pandas as pd
 from torch.utils.data import Dataset
 
-from prepare_data import (
-    prepare_dataset,
-    EMBEDDINGS_PATH,
-    LABELS_PATH,
-    METADATA_PATH,
-)
+from prepare_data import prepare_dataset,EMBEDDINGS_PATH,LABELS_PATH,METADATA_PATH
 
 
 class TrumpTweetDataset(Dataset):
