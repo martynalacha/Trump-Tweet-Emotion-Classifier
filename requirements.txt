@@ -4,3 +4,8 @@ kagglehub
 scikit-learn
 torch
 transformers
+sentence-transformers
+shap
+matplotlib
+tqdm
+numpy

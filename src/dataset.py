@@ -6,6 +6,12 @@ from prepare_data import prepare_dataset,EMBEDDINGS_PATH,LABELS_PATH,METADATA_PA
 
 
 class TrumpTweetDataset(Dataset):
+    """
+    Dataset tweetów Trumpa z embeddingami DistilBERT i etykietami VADER.
+ 
+    Etykiety: 0 = negative, 1 = neutral, 2 = positive
+    Embeddingi: 768-dim CLS token z DistilBERT
+    """
 
     def __init__(
         self,

@@ -1,3 +1,19 @@
-*data/*
-.venv/*
+# Python cache
+__pycache__/
+*.py[cod]
 *cache*
+
+# IDE / Editor
+.vscode/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Project data and outputs
+data/
+models/
+
+# Jupyter
+.ipynb_checkpoints/
