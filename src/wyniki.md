@@ -646,4 +646,4 @@ PODSUMOWANIE — DistilBERT Fine-tuned vs Frozen
 
 ✓ Wykresy zapisane w 'plots/'.
 ✓ Model zapisany: models/distilbert_ft_best.pt
-<Figure size 640x480 with 0 Axes>
+<Figure size 640x480 with 0 Axes> 
