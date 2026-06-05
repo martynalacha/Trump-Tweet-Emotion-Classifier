@@ -1,22 +1,21 @@
 """
-Analiza SHAP dla obu podejść.
+Analiza SHAP dla podejść 1, 2 i baseline TF-IDF.
 
 Dla MLP na embeddingach (DistilBERT i SBERT) SHAP działa na wymiarach
-przestrzeni embeddingów — pokazuje, które wymiary (cechy ukryte) najbardziej
-wpływają na predykcję danej klasy.
+przestrzeni embeddingów — pokazuje, które wymiary najbardziej wpływają
+na predykcję danej klasy emocji.
 
-Dodatkowa analiza dla SBERT: można zbadać, które tweety (przykłady) mają
-największy wpływ — SHAP DeepExplainer lub KernelExplainer.
+Dla baseline TF-IDF + LogReg SHAP działa na poziomie słów —
+przydatne do interpretacji i dyskusji w projekcie.
 
-Używamy shap.DeepExplainer (PyTorch) dla szybkości.
-Dla porównania z "interpretowalnymi cechami" (TF-IDF) używamy
-shap.LinearExplainer na prostym baseline modelu LogReg+TF-IDF.
+Uwaga: SHAP DeepExplainer nie obsługuje BiLSTM (Podejście 3) ze względu
+na pack_padded_sequence — dlatego SHAP liczymy tylko dla MLP (1 i 2).
 
 Funkcje:
-- run_shap_deep         : SHAP dla modeli MLP (DistilBERT / SBERT embeddingi)
-- run_shap_tfidf        : SHAP dla baseline LogReg + TF-IDF (słowa jako cechy)
-- plot_shap_summary     : summary plot
-- plot_shap_bar         : bar plot ważności cech
+- run_shap_deep     : SHAP dla modeli MLP (DistilBERT / SBERT)
+- plot_shap_summary : summary plot dla wybranej klasy emocji
+- plot_shap_bar     : bar plot średniej ważności dla wszystkich klas
+- run_shap_tfidf    : SHAP dla baseline LogReg + TF-IDF (słowa jako cechy)
 """
 
 import os
@@ -26,18 +25,23 @@ import torch
 import torch.nn as nn
 import shap
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
+
+from prepare_data import EMOTION_LABELS
 
 PLOTS_DIR = "plots"
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
-# SHAP dla modeli MLP (embeddingi)
 
 def _loader_to_numpy(loader: DataLoader, max_samples: int = 2000):
-    """Konwertuje DataLoader -> numpy array (max_samples próbek)."""
+    """
+    Konwertuje DataLoader -> numpy array (max_samples próbek).
+    Obsługuje tylko loadery MLP (batch = embeddings, labels).
+    """
     all_emb = []
     all_lab = []
-    for emb, lab in loader:
+    for batch in loader:
+        emb, lab = batch[0], batch[-1]   # działa dla (emb, lab) i (seq, len, lab)
         all_emb.append(emb.numpy())
         all_lab.append(lab.numpy())
         if sum(len(x) for x in all_emb) >= max_samples:
@@ -55,18 +59,18 @@ def run_shap_deep(
     device: torch.device = None,
     n_background: int = 200,
     n_explain: int = 100,
-) -> shap.Explanation:
+):
     """
     Oblicza wartości SHAP dla MLP za pomocą DeepExplainer.
 
     Parametry
     ---------
-    n_background : liczba próbek tła (referencyjne)
-    n_explain    : liczba próbek do wyjaśnienia
+    n_background : liczba próbek tła (referencyjne dla eksplanatora)
+    n_explain    : liczba próbek testowych do wyjaśnienia
 
-    Zwraca obiekt shap.Explanation (shap_values).
+    Zwraca (shap_values, X_test, y_test).
+    shap_values: lista tablic (n_explain, n_features) — jedna per klasa emocji.
     """
-
     if device is None:
         device = torch.device("cpu")
 
@@ -76,21 +80,22 @@ def run_shap_deep(
     X_train, _ = _loader_to_numpy(train_loader, max_samples=n_background)
     X_test, y_test = _loader_to_numpy(test_loader, max_samples=n_explain)
 
-    background = torch.tensor(X_train[:n_background], dtype=torch.float32).to(device)
-    explain_data = torch.tensor(X_test[:n_explain], dtype=torch.float32).to(device)
+    background   = torch.tensor(X_train[:n_background], dtype=torch.float32).to(device)
+    explain_data = torch.tensor(X_test[:n_explain],     dtype=torch.float32).to(device)
 
     print(f"Obliczam SHAP (DeepExplainer) dla: {model_name}...")
-    explainer = shap.DeepExplainer(model, background)
+    explainer   = shap.GradientExplainer(model, background)
     shap_values = explainer.shap_values(explain_data)
-    
+
     if torch.is_tensor(shap_values):
         shap_values = shap_values.cpu().numpy()
-        
+
+    # Normalizacja formatu -> lista [ (n_samples, n_features) ] per klasa
     if isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
-        # Konwersja (n_samples, n_features, n_classes) na liste [ (n_samples, n_features) dla kazdej klasy ]
         shap_values = [shap_values[:, :, i] for i in range(shap_values.shape[2])]
 
-    print(f"SHAP obliczone. Kształt (klasa 0): {shap_values[0].shape}")
+    print(f"SHAP obliczone. Liczba klas: {len(shap_values)}, "
+          f"kształt (klasa 0): {shap_values[0].shape}")
 
     return shap_values, X_test, y_test
 
@@ -99,18 +104,16 @@ def plot_shap_summary(
     shap_values,
     X_test: np.ndarray,
     model_name: str = "model",
-    class_idx: int = 2,
+    class_idx: int = 0,
     max_display: int = 20,
 ) -> None:
     """
     Summary plot SHAP — top N najbardziej wpływowych wymiarów embeddingu
-    dla wybranej klasy.
+    dla wybranej klasy emocji.
 
-    class_idx: 0=negative, 1=neutral, 2=positive
+    class_idx: 0-9 zgodnie z EMOTION_LABELS z prepare_data.py
     """
-
-    class_names = {0: "Negative", 1: "Neutral", 2: "Positive"}
-    class_label = class_names.get(class_idx, str(class_idx))
+    class_label = EMOTION_LABELS[class_idx] if class_idx < len(EMOTION_LABELS) else str(class_idx)
 
     plt.figure()
     shap.summary_plot(
@@ -135,21 +138,27 @@ def plot_shap_bar(
     max_display: int = 20,
 ) -> None:
     """
-    Bar plot — średnia |SHAP| dla każdej klasy (mean absolute importance).
+    Bar plot — średnia |SHAP| per klasa emocji (mean absolute importance).
+    Jeden subplot na klasę.
     """
-
     n_classes = len(shap_values)
-    class_names = ["Negative", "Neutral", "Positive"]
-    fig, axes = plt.subplots(1, n_classes, figsize=(5 * n_classes, 5))
+    cols = 4
+    rows = (n_classes + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 5))
+    axes = axes.flatten()
 
-    for i, ax in enumerate(axes):
+    for i, ax in enumerate(axes[:n_classes]):
         mean_abs = np.abs(shap_values[i]).mean(axis=0)
-        top_idx = np.argsort(mean_abs)[-max_display:]
+        top_idx  = np.argsort(mean_abs)[-max_display:]
         ax.barh(range(len(top_idx)), mean_abs[top_idx])
         ax.set_yticks(range(len(top_idx)))
-        ax.set_yticklabels([f"dim_{j}" for j in top_idx], fontsize=7)
-        ax.set_title(f"Klasa: {class_names[i]}")
+        ax.set_yticklabels([f"dim_{j}" for j in top_idx], fontsize=6)
+        ax.set_title(EMOTION_LABELS[i], fontsize=10)
         ax.set_xlabel("mean |SHAP|")
+
+    # Ukryj puste subploty jeśli klas < 11
+    for i in range(n_classes, len(axes)):
+        axes[i].set_visible(False)
 
     plt.suptitle(f"SHAP Feature Importance — {model_name}", fontsize=13)
     plt.tight_layout()
@@ -159,7 +168,6 @@ def plot_shap_bar(
     print(f"SHAP bar plot zapisany: {save_path}")
     plt.show()
 
-# SHAP dla TF-IDF + LogisticRegression (baseline — słowa jako cechy)
 
 def run_shap_tfidf(
     tweets: list,
@@ -167,16 +175,13 @@ def run_shap_tfidf(
     model_name: str = "tfidf_logreg",
     max_features: int = 5000,
     n_explain: int = 200,
-) -> None:
+):
     """
-    Trenuje prosty baseline LogReg + TF-IDF i oblicza SHAP LinearExplainer.
-    
-    Jest to DODATKOWA analiza dająca interpretowalność na poziomie słów
-    (w przeciwieństwie do wymiarów embeddingów).
-    
-    Przydatne do sekcji dyskusji w projekcie.
-    """
+    Trenuje baseline LogReg + TF-IDF i oblicza SHAP LinearExplainer.
 
+    Daje interpretowalność na poziomie słów (które słowa są ważne
+    dla danej emocji) — uzupełnienie dla SHAP na wymiarach embeddingów.
+    """
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import train_test_split
@@ -197,28 +202,22 @@ def run_shap_tfidf(
 
     y_pred = clf.predict(X_test)
     print("\nWyniki baseline TF-IDF + LogReg:")
-    print(classification_report(y_test, y_pred, target_names=["Negative", "Neutral", "Positive"]))
+    print(classification_report(y_test, y_pred, target_names=EMOTION_LABELS, zero_division=0))
 
-    # SHAP LinearExplainer
     print("Obliczam SHAP (LinearExplainer)...")
-    explainer = shap.LinearExplainer(clf, X_train, feature_perturbation="interventional")
-
-    X_explain = X_test[:n_explain]
+    explainer   = shap.LinearExplainer(clf, X_train, feature_perturbation="interventional")
+    X_explain   = X_test[:n_explain]
     shap_values = explainer.shap_values(X_explain)
-    
-    # Obsługa nowszego formatu shap.Explanation / macierzy 3D dla LinearExplainer
+
+    # Normalizacja formatu (nowsze wersje shap zwracają różne typy)
     if not isinstance(shap_values, list):
-        if hasattr(shap_values, 'values'):
-            shap_values_array = shap_values.values
-        else:
-            shap_values_array = shap_values
-            
-        if shap_values_array.ndim == 3:
-            shap_values = [shap_values_array[:, :, i] for i in range(shap_values_array.shape[2])]
+        arr = shap_values.values if hasattr(shap_values, "values") else shap_values
+        if arr.ndim == 3:
+            shap_values = [arr[:, :, i] for i in range(arr.shape[2])]
 
     feature_names = vectorizer.get_feature_names_out()
 
-    for class_idx, class_label in enumerate(["Negative", "Neutral", "Positive"]):
+    for class_idx, class_label in enumerate(EMOTION_LABELS):
         plt.figure()
         shap.summary_plot(
             shap_values[class_idx],
@@ -230,7 +229,6 @@ def run_shap_tfidf(
         )
         plt.title(f"SHAP TF-IDF — {class_label}")
         plt.tight_layout()
-
         save_path = os.path.join(PLOTS_DIR, f"shap_tfidf_{model_name}_class{class_idx}.png")
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"SHAP TF-IDF zapisany: {save_path}")

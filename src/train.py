@@ -1,11 +1,15 @@
 """
-Pętla treningowa — wspólna dla obu podejść (MLP na DistilBERT i MLP na SBERT).
+Pętla treningowa — wspólna dla wszystkich podejść (MLP i BiLSTM).
 
 Funkcje:
 - train_epoch   : jedna epoka treningu
 - eval_epoch    : ewaluacja na zbiorze val/test
 - train_model   : pełny trening z early stopping + zapis najlepszego modelu
 - plot_history  : wykres loss i accuracy
+
+Obsługuje:
+- MLP (Podejście 1: DistilBERT, Podejście 2: SBERT) — batch = (embeddings, labels)
+- BiLSTM (Podejście 3: GloVe) — batch = (sequences, lengths, labels)
 """
 
 import os
@@ -19,6 +23,11 @@ import matplotlib.pyplot as plt
 
 MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
+
+
+def _is_lstm_batch(batch) -> bool:
+    """Sprawdza czy batch pochodzi z GloVeDataset (3 elementy: seq, lengths, labels)."""
+    return len(batch) == 3
 
 
 def train_epoch(
@@ -35,16 +44,26 @@ def train_epoch(
     correct = 0
     total = 0
 
-    for embeddings, labels in loader:
-        embeddings = embeddings.to(device)
-        labels = labels.to(device)
+    for batch in loader:
+        if _is_lstm_batch(batch):
+            inputs, lengths, labels = batch
+            inputs = inputs.to(device)
+            lengths = lengths.to(device)
+            labels = labels.to(device)
+            optimizer.zero_grad()
+            logits = model(inputs, lengths)
+        else:
+            inputs, labels = batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            optimizer.zero_grad()
+            logits = model(inputs)
 
-        optimizer.zero_grad()
-        logits = model(embeddings)
         loss = criterion(logits, labels)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-
+        
         total_loss += loss.item() * len(labels)
         preds = logits.argmax(dim=1)
         correct += (preds == labels).sum().item()
@@ -67,13 +86,20 @@ def eval_epoch(
     total = 0
 
     with torch.no_grad():
-        for embeddings, labels in loader:
-            embeddings = embeddings.to(device)
-            labels = labels.to(device)
+        for batch in loader:
+            if _is_lstm_batch(batch):
+                inputs, lengths, labels = batch
+                inputs = inputs.to(device)
+                lengths = lengths.to(device)
+                labels = labels.to(device)
+                logits = model(inputs, lengths)
+            else:
+                inputs, labels = batch
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                logits = model(inputs)
 
-            logits = model(embeddings)
             loss = criterion(logits, labels)
-
             total_loss += loss.item() * len(labels)
             preds = logits.argmax(dim=1)
             correct += (preds == labels).sum().item()
@@ -99,7 +125,7 @@ def train_model(
     ---------
     model_name : nazwa używana do zapisu pliku (.pt)
     patience   : ile epok bez poprawy val_loss przed zatrzymaniem
-    
+
     Zwraca słownik z historią treningową.
     """
 
@@ -108,7 +134,20 @@ def train_model(
 
     model.to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    # Zliczanie klas
+    subset_indices = train_loader.dataset.indices
+    full_labels = train_loader.dataset.dataset.labels
+    train_labels = full_labels[subset_indices]
+
+    class_counts = torch.bincount(train_labels).to(torch.float32)
+    total_samples = class_counts.sum()
+    class_weights = total_samples / (len(class_counts) * class_counts)
+
+    class_weights = torch.where(torch.isinf(class_weights), torch.zeros_like(class_weights), class_weights)
+    class_weights = class_weights.to(device)
+
+    
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=3, factor=0.5
@@ -159,7 +198,6 @@ def train_model(
     print(f"\nNajlepszy model zapisany: {best_model_path}")
     print(f"Najlepsza val_loss: {best_val_loss:.4f}")
 
-    # Załaduj najlepszy model
     model.load_state_dict(torch.load(best_model_path, map_location=device))
 
     return history
@@ -174,7 +212,6 @@ def plot_history(
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
-    # Loss
     axes[0].plot(history["train_loss"], label="train")
     axes[0].plot(history["val_loss"], label="val")
     axes[0].set_title(f"{model_name} — Loss")
@@ -183,7 +220,6 @@ def plot_history(
     axes[0].legend()
     axes[0].grid(True)
 
-    # Accuracy
     axes[1].plot(history["train_acc"], label="train")
     axes[1].plot(history["val_acc"], label="val")
     axes[1].set_title(f"{model_name} — Accuracy")

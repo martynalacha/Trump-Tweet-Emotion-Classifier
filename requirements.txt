@@ -9,3 +9,6 @@ shap
 matplotlib
 tqdm
 numpy
+nrclex == 3.0.0
+gensim
+seaborn
