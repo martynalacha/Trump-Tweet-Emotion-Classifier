@@ -9,7 +9,7 @@ https://www.kaggle.com/datasets/austinreese/trump-tweets
 
 
 
-## Zespół
+## Zespół:
 
 * Piotr Waszak
 * Julia Mucha
