@@ -575,39 +575,42 @@ PODSUMOWANIE WYNIKÓW (11 klas emocji)
 
 
 Używane urządzenie: cuda
-Hiperparametry: samples=8000, epochs=3, lr_bert=2e-05, lr_head=0.001, batch=32
+Hiperparametry: samples=12000, epochs=8, lr_bert=3e-05, lr_head=0.0003, batch=32
 
 [1/4] Ładuję dataset (tokeny DistilBERT, podzbiór stratyfikowany)...
-Komplet wszystkich danych (etykiety + 3 rodzaje embeddingów) już istnieje na dysku.
+Etykiety i metadata już istnieją na dysku — pomijam generowanie.
 Ładuję tokenizer DistilBERT: distilbert-base-uncased
-Tokenizuję 8000 tweetów (max_length=64)...
-  input_ids shape: torch.Size([8000, 64])
-  Rozkład klas (podzbiór): [1111, 552, 1136, 327, 83, 108, 690, 979, 232, 338, 2444]
-  Train: 5600 | Val: 1200 | Test: 1200
+Tokenizuję 12000 tweetów (max_length=64)...
+  input_ids shape: torch.Size([12000, 64])
+  Rozkład klas (podzbiór): [1666, 828, 1704, 490, 125, 162, 1035, 1469, 348, 507, 3666]
+  Train: 8400 | Val: 1800 | Test: 1800
 
 [2/4] Inicjalizuję model DistilBERT + klasyfikator...
 Loading weights: 100%
- 100/100 [00:00<00:00, 173.41it/s, Materializing param=transformer.layer.5.sa_layer_norm.weight]
-DistilBertModel LOAD REPORT from: distilbert-base-uncased
+ 100/100 [00:00<00:00, 3955.06it/s]
+[transformers] DistilBertModel LOAD REPORT from: distilbert-base-uncased
 Key                     | Status     |  | 
 ------------------------+------------+--+-
-vocab_transform.weight  | UNEXPECTED |  | 
 vocab_layer_norm.bias   | UNEXPECTED |  | 
-vocab_projector.bias    | UNEXPECTED |  | 
+vocab_transform.weight  | UNEXPECTED |  | 
 vocab_transform.bias    | UNEXPECTED |  | 
+vocab_projector.bias    | UNEXPECTED |  | 
 vocab_layer_norm.weight | UNEXPECTED |  | 
 
 Notes:
-- UNEXPECTED	:can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
 
-[3/4] Trening (3 epoki, early stopping patience=2)...
+[3/4] Trening (8 epoki, early stopping patience=2)...
 ============================================================
-Epoka  1/3 | train_loss=2.4005 train_acc=0.0900 | val_loss=2.3985 val_acc=0.1000
-Epoka  2/3 | train_loss=2.3911 train_acc=0.1286 | val_loss=2.3917 val_acc=0.1775
-Epoka  3/3 | train_loss=2.3719 train_acc=0.2245 | val_loss=2.3699 val_acc=0.3100
+Epoka  1/8 | train_loss=2.0961 train_acc=0.3036 | val_loss=1.8305 val_acc=0.3922
+Epoka  2/8 | train_loss=1.4926 train_acc=0.5039 | val_loss=1.4565 val_acc=0.5267
+Epoka  3/8 | train_loss=1.0168 train_acc=0.6450 | val_loss=1.4739 val_acc=0.5933
+Epoka  4/8 | train_loss=0.6399 train_acc=0.7568 | val_loss=1.6016 val_acc=0.6300
+
+Early stopping po epoce 4.
 
 Najlepszy model zapisany: models/distilbert_ft_best.pt
-Najlepsza val_loss: 2.3699
+Najlepsza val_loss: 1.4565
 
 [4/4] Ewaluacja na zbiorze testowym...
 Wykres treningowy zapisany: plots/history_distilbert_ft.png
@@ -618,21 +621,21 @@ Wyniki: DistilBERT Fine-tuned (end-to-end)
 ============================================================
               precision    recall  f1-score   support
 
-       angry       0.33      0.47      0.39       185
-     fearful       0.08      0.04      0.05        72
-      joyful       0.26      0.35      0.30       149
-         sad       0.10      0.18      0.13        51
-   disgusted       0.00      0.00      0.00        13
-   surprised       0.00      0.00      0.00        17
-enthusiastic       0.40      0.02      0.03       116
-    trusting       0.17      0.02      0.03       126
-   sarcastic       0.00      0.00      0.00        33
-   patriotic       0.18      0.43      0.25        54
-     neutral       0.51      0.62      0.56       384
+       angry       0.57      0.38      0.46       253
+     fearful       0.44      0.34      0.39       122
+      joyful       0.52      0.58      0.55       220
+         sad       0.23      0.49      0.32        73
+   disgusted       0.30      0.61      0.41        23
+   surprised       0.08      0.48      0.14        21
+enthusiastic       0.53      0.64      0.58       157
+    trusting       0.42      0.31      0.36       230
+   sarcastic       0.28      0.50      0.36        66
+   patriotic       0.41      0.57      0.48        84
+     neutral       0.86      0.59      0.70       551
 
-    accuracy                           0.35      1200
-   macro avg       0.18      0.19      0.16      1200
-weighted avg       0.32      0.35      0.30      1200
+    accuracy                           0.50      1800
+   macro avg       0.42      0.50      0.43      1800
+weighted avg       0.58      0.50      0.52      1800
 
 Confusion matrix zapisana: plots/confusion_matrix_DistilBERT_FT.png
 
@@ -640,10 +643,10 @@ Confusion matrix zapisana: plots/confusion_matrix_DistilBERT_FT.png
 ============================================================
 PODSUMOWANIE — DistilBERT Fine-tuned vs Frozen
 ============================================================
-  DistilBERT FT  (end-to-end): acc=0.346  f1_macro=0.158
+  DistilBERT FT  (end-to-end): acc=0.503  f1_macro=0.431
   DistilBERT MLP (zamrożony):  acc=0.297  f1_macro=0.215  [z main.py]
   GloVe+BiLSTM   (referencja): acc=0.481  f1_macro=0.412  [z main.py]
 
 ✓ Wykresy zapisane w 'plots/'.
 ✓ Model zapisany: models/distilbert_ft_best.pt
-<Figure size 640x480 with 0 Axes> 
+<Figure size 640x480 with 0 Axes>

@@ -12,9 +12,6 @@ Podejście 2: SBERT embeddingi (384-dim) + MLP
 Podejście 3: GloVe (200-dim) + BiLSTM  (inna rodzina niż BERT)
 Podejście 4: Zero-Shot z BART          (bez trenowania, te same 11 etykiet)
 
-Uruchomienie:
-    pip install nrclex gensim sentence-transformers transformers kagglehub
-    python main.py
 """
 
 import os

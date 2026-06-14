@@ -6,7 +6,7 @@ Uruchomienie (zakłada że main.py był już raz uruchomiony i dane istnieją):
 
 Co robi:
 - Ładuje tokeny z DistilBertFTDataset (podzbiór 8k, stratyfikowany)
-- Trenuje DistilBERT + klasyfikator end-to-end (3 epoki, early stopping)
+- Trenuje DistilBERT + klasyfikator end-to-end 
 - Zapisuje wykresy treningowe i confusion matrix do plots/
 - Zapisuje najlepszy model do models/distilbert_ft_best.pt
 - Drukuje porównanie z zamrożonym DistilBERT (Podejście 1) jeśli dostępne
@@ -16,6 +16,7 @@ Dlaczego osobny skrypt a nie main.py:
 - Można uruchomić wielokrotnie zmieniając hiperparametry
 - Wyniki i tak trafiają do tych samych plots/ i models/
 """
+
 
 import os
 import torch
@@ -35,17 +36,18 @@ from sklearn.metrics import (
 from dataset_ft import DistilBertFTDataset
 from prepare_data import EMOTION_LABELS
 
-# ── Hiperparametry ────────────────────────────────────────────────────────────
-MAX_SAMPLES  = 8_000    # podzbiór — zwiększ jeśli masz czas/GPU
-MAX_LENGTH   = 64       # długość sekwencji tokenów
+# Hiperparametry 
+MAX_SAMPLES  = 12000    # podzbiór 
+MAX_LENGTH   = 64      # długość sekwencji tokenów
 BATCH_SIZE   = 32       # mniejszy niż MLP bo BERT jest cięższy
-EPOCHS       = 3        # szybki trening; zwiększ do 5-8 dla lepszych wyników
-LR_BERT      = 2e-5     # standardowy LR dla fine-tuningu BERT
-LR_HEAD      = 1e-3     # wyższy LR dla głowy klasyfikacyjnej
+EPOCHS       = 8        # szybki trening;
+LR_BERT      = 3e-5     # standardowy LR dla fine-tuningu BERT
+LR_HEAD      = 3e-4     # wyższy LR dla głowy klasyfikacyjnej
 PATIENCE     = 2        # early stopping
 VAL_SPLIT    = 0.15
 TEST_SPLIT   = 0.15
 NUM_CLASSES  = 11
+NUM_WORKERS  = 2 
 PLOTS_DIR    = "plots"
 MODELS_DIR   = "models"
 
@@ -56,7 +58,7 @@ DISTILBERT_MODEL_NAME = "distilbert-base-uncased"
 MODEL_SAVE_PATH = os.path.join(MODELS_DIR, "distilbert_ft_best.pt")
 
 
-# ── Model ─────────────────────────────────────────────────────────────────────
+# Model 
 
 class DistilBertClassifier(nn.Module):
     """
@@ -90,7 +92,7 @@ class DistilBertClassifier(nn.Module):
         return self.classifier(cls_token)
 
 
-# ── Pętle treningowe ──────────────────────────────────────────────────────────
+# Pętle treningowe 
 
 def train_epoch_ft(model, loader, optimizer, criterion, device):
     model.train()
@@ -149,7 +151,7 @@ def get_predictions_ft(model, loader, device):
     return np.array(all_labels), np.array(all_preds)
 
 
-# ── Wykresy ───────────────────────────────────────────────────────────────────
+# Wykresy 
 
 def plot_history_ft(history: dict) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
@@ -188,7 +190,7 @@ def plot_confusion_matrix_ft(y_true, y_pred) -> None:
     plt.show()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main 
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -196,7 +198,7 @@ if __name__ == "__main__":
     print(f"Hiperparametry: samples={MAX_SAMPLES}, epochs={EPOCHS}, "
           f"lr_bert={LR_BERT}, lr_head={LR_HEAD}, batch={BATCH_SIZE}\n")
 
-    # ── 1. Dataset i split ────────────────────────────────────────────────────
+    # Dataset i split 
     print("[1/4] Ładuję dataset (tokeny DistilBERT, podzbiór stratyfikowany)...")
     dataset = DistilBertFTDataset(
         overwrite=False,
@@ -216,15 +218,17 @@ if __name__ == "__main__":
         generator=torch.Generator().manual_seed(42),
     )
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE)
-    test_loader  = DataLoader(test_ds,  batch_size=BATCH_SIZE)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True)
+    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=True)
+    test_loader  = DataLoader(test_ds,  batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=True)
 
     print(f"  Train: {len(train_ds)} | Val: {len(val_ds)} | Test: {len(test_ds)}")
 
-    # ── 2. Model i optymizator ────────────────────────────────────────────────
+    # Model i optymizator 
     print("\n[2/4] Inicjalizuję model DistilBERT + klasyfikator...")
     model = DistilBertClassifier(num_classes=NUM_CLASSES).to(device)
+    model.bert.enable_input_require_grads()
+    model.bert.gradient_checkpointing_enable()
 
     # Dwie grupy parametrów z różnymi LR:
     # - wagi BERT: mały LR żeby nie zniszczyć pre-treningu
@@ -246,19 +250,11 @@ if __name__ == "__main__":
 
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    # Liniowy warmup + cosine decay
-    total_steps   = EPOCHS * len(train_loader)
-    warmup_steps  = int(0.1 * total_steps)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode="min", patience=1, factor=0.5
+)
 
-    def lr_lambda(current_step):
-        if current_step < warmup_steps:
-            return current_step / max(1, warmup_steps)
-        progress = (current_step - warmup_steps) / max(1, total_steps - warmup_steps)
-        return max(0.0, 0.5 * (1.0 + np.cos(np.pi * progress)))
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
-    # ── 3. Trening z early stopping ───────────────────────────────────────────
+    # Trening z early stopping 
     print(f"\n[3/4] Trening ({EPOCHS} epoki, early stopping patience={PATIENCE})...")
     print("=" * 60)
 
@@ -269,7 +265,7 @@ if __name__ == "__main__":
     for epoch in range(1, EPOCHS + 1):
         train_loss, train_acc = train_epoch_ft(model, train_loader, optimizer, criterion, device)
         val_loss,   val_acc   = eval_epoch_ft(model, val_loader, criterion, device)
-        scheduler.step()
+        scheduler.step(val_loss)
 
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
@@ -292,9 +288,9 @@ if __name__ == "__main__":
 
     print(f"\nNajlepszy model zapisany: {MODEL_SAVE_PATH}")
     print(f"Najlepsza val_loss: {best_val_loss:.4f}")
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device))
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device, weights_only=True))
 
-    # ── 4. Ewaluacja i wykresy ────────────────────────────────────────────────
+    #  Ewaluacja i wykresy 
     print("\n[4/4] Ewaluacja na zbiorze testowym...")
     plot_history_ft(history)
 

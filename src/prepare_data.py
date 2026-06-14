@@ -204,6 +204,64 @@ def _prepare_glove_data(cleaned_tweets: list) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 # Główny koordynator procesu
 # ──────────────────────────────────────────────────────────────────────────────
+def prepare_labels_only(overwrite: bool = False, threshold: float = 0.0) -> None:
+    """
+    Generuje TYLKO etykiety (labels.pt) i metadata.csv — bez żadnych embeddingów.
+ 
+    Używana przez DistilBertFTDataset zamiast prepare_dataset(), żeby
+    train_finetune.py nie ładował DistilBERT/SBERT/GloVe których nie potrzebuje.
+ 
+    Generuje tylko brakujące pliki — jeśli oba istnieją i overwrite=False, nic nie robi.
+    """
+    labels_ok   = os.path.exists(LABELS_PATH)
+    metadata_ok = os.path.exists(METADATA_PATH)
+    need_labels   = overwrite or not labels_ok
+    need_metadata = overwrite or not metadata_ok
+ 
+    if not need_labels and not need_metadata:
+        print("Etykiety i metadata już istnieją na dysku — pomijam generowanie.")
+        return
+ 
+    if need_labels:
+        print("Brakuje labels.pt — wygeneruję.")
+    if need_metadata:
+        print("Brakuje metadata.csv — wygeneruję.")
+ 
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+ 
+    nltk.download("vader_lexicon", quiet=True)
+    nltk.download("punkt", quiet=True)
+    nltk.download("punkt_tab", quiet=True)
+ 
+    vader_sia = SentimentIntensityAnalyzer()
+ 
+    print("Pobieram dataset z Kaggle (tylko etykiety, bez embeddingów)...")
+    path = kagglehub.dataset_download(DATASET_NAME)
+    raw_df = pd.read_csv(os.path.join(path, CSV_NAME))
+ 
+    tweets = raw_df["content"].dropna().tolist()
+    cleaned_tweets = [clean_text(t) for t in tweets]
+    print(f"Liczba tweetów: {len(cleaned_tweets)}")
+ 
+    print("\nGeneruję etykiety emocji (NRC + reguły)...")
+    all_labels = []
+    metadata_rows = []
+ 
+    for tweet in tqdm(cleaned_tweets, desc="Etykietowanie"):
+        label = generate_emotion_label(tweet, vader_sia, threshold=threshold)
+        if need_labels:
+            all_labels.append(label)
+        if need_metadata:
+            metadata_rows.append({"tweet": tweet, "label": label})
+ 
+    if need_labels:
+        torch.save(torch.tensor(all_labels, dtype=torch.long), LABELS_PATH)
+        print(f"Zapisano: {LABELS_PATH}")
+    if need_metadata:
+        pd.DataFrame(metadata_rows).to_csv(METADATA_PATH, index=False)
+        print(f"Zapisano: {METADATA_PATH}")
+ 
+
 
 def prepare_dataset(
         overwrite: bool = False,

@@ -15,8 +15,11 @@ import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
+from sklearn.model_selection import train_test_split
+import numpy as np
+
 from prepare_data import (
-    prepare_dataset,
+    prepare_labels_only,
     METADATA_PATH,
     LABELS_PATH,
 )
@@ -43,16 +46,11 @@ class DistilBertFTDataset(Dataset):
         max_length: int = MAX_LENGTH,
     ):
         super().__init__()
-        # Upewniamy się że etykiety i metadane istnieją na dysku
-        prepare_dataset(overwrite=overwrite, device=device)
-
+        prepare_labels_only(overwrite=overwrite)
         self.labels = torch.load(LABELS_PATH, weights_only=False)
         self.df = pd.read_csv(METADATA_PATH)
 
-        # Przycinamy do max_samples — stratyfikowane żeby zachować rozkład klas
         if max_samples is not None and max_samples < len(self.labels):
-            from sklearn.model_selection import train_test_split
-            import numpy as np
             indices = np.arange(len(self.labels))
             labels_np = self.labels.numpy()
             # train_test_split z stratify daje reprezentatywny podzbiór

@@ -111,7 +111,6 @@ def plot_shap_summary(
     Summary plot SHAP — top N najbardziej wpływowych wymiarów embeddingu
     dla wybranej klasy emocji.
 
-    class_idx: 0-9 zgodnie z EMOTION_LABELS z prepare_data.py
     """
     class_label = EMOTION_LABELS[class_idx] if class_idx < len(EMOTION_LABELS) else str(class_idx)
 

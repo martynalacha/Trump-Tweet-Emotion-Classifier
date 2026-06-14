@@ -59,7 +59,6 @@ def run_zero_shot(
     print(f"Loading zero-shot model: {model_name}...")
     device_id = 0 if (device is not None and str(device) == "cuda") else -1
 
-    # 1. Define batch_size at pipeline initialization to enable internal GPU batching
     classifier = pipeline(
         "zero-shot-classification",
         model=model_name,
@@ -71,14 +70,14 @@ def run_zero_shot(
     results = []
     threshold = 0.4 
 
-    # 2. Use a generator to stream data into the pipeline efficiently
+
     def tweet_generator():
         for tweet in tweets:
             yield tweet
 
     print(f"Classifying {len(tweets)} tweets using native GPU batching...")
 
-    # 3. Pass the generator directly; the pipeline will internally manage DataLoader batches
+
     outputs = classifier(
         tweet_generator(),
         candidate_labels=active_labels,
@@ -86,7 +85,7 @@ def run_zero_shot(
         hypothesis_template="This tweet expresses the emotion of {}."
     )
 
-    # 4. Iterate over the output generator with tqdm for progress tracking
+ 
     for out in tqdm(outputs, total=len(tweets)):
         label_score_map = dict(zip(out["labels"], out["scores"]))
         
@@ -147,13 +146,13 @@ def evaluate_zero_shot(
     y_pred = np.array([label_to_idx.get(l, 0) for l in top_labels_str])
     y_true = np.array(true_labels)
 
-    # ── 1. Raport klasyfikacji ────────────────────────────────────────────────
+    # 1. Raport klasyfikacji
     print("\n" + "="*60)
     print("Wyniki Zero-Shot (BART) — 11 klas emocji")
     print("="*60)
     print(classification_report(y_true, y_pred, target_names=label_names, zero_division=0))
 
-    # ── 2. Confusion matrix ───────────────────────────────────────────────────
+    # 2. Confusion matrix
     cm = confusion_matrix(y_true, y_pred)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=label_names)
     fig, ax = plt.subplots(figsize=(11, 8))
@@ -165,7 +164,7 @@ def evaluate_zero_shot(
     print(f"Confusion matrix zapisana: {cm_path}")
     plt.show()
 
-    # ── 3. Rozkład etykiet zero-shot ──────────────────────────────────────────
+    # Rozkład etykiet zero-shot 
     label_counts = {name: top_labels_str.count(name) for name in label_names}
     sorted_names = sorted(label_counts, key=label_counts.get, reverse=True)
     counts = [label_counts[n] for n in sorted_names]
@@ -184,7 +183,7 @@ def evaluate_zero_shot(
     print(f"Rozkład etykiet zapisany: {dist_path}")
     plt.show()
 
-    # ── 4. Rozkład pewności predykcji ─────────────────────────────────────────
+    # 4. Rozkład pewności predykcji 
     top_scores = [r["top_score"] for r in results]
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.hist(top_scores, bins=50, color="#4C72B0", edgecolor="white", alpha=0.85)
