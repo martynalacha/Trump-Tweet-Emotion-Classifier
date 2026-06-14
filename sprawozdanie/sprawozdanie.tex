@@ -26,22 +26,33 @@ linkcolor=blue,
 urlcolor=blue
 }
 
-\title{
-\textbf{Sprawozdanie - Analiza sentymentu tweetów Donalda Trumpa}
-}
-
-\author{
-Autorzy:\
-Martyna Lach,\
-Julia Mucha,\
-Piotr Waszak
-}
-
-\date{\today}
-
 \begin{document}
 
-\maketitle
+\begin{titlepage}
+\centering
+
+\vspace*{2cm}
+
+{\LARGE\textbf{Dokumentacja}}\\[0.5cm]
+{\Large Metody Inteligencji Obliczeniowej}\\[1cm]
+{\Huge\textbf{Analiza sentymentu tweetów Donalda Trumpa}}\\[3cm]
+
+\includegraphics[width=0.25\textwidth]{figures/agh.png}\\[2cm]
+
+{\Large Wydział Fizyki i Informatyki Stosowanej}\\[1.5cm]
+
+\begin{tabular}{c}
+Martyna Lach \\
+Julia Mucha \\
+Piotr Waszak
+
+\end{tabular}
+
+\vfill
+
+015.06.2026
+
+\end{titlepage}
 
 \tableofcontents
 \newpage
@@ -68,6 +79,7 @@ W ramach projektu przygotowano automatyczny system etykietowania tweetów, a nas
 
 \begin{itemize}
 \item DistilBERT + MLP,
+\item DistilBERT (end-to-end),
 \item SBERT + MLP,
 \item GloVe + BiLSTM,
 \item Zero-Shot BART,
@@ -136,42 +148,48 @@ Jak pokazano na rysunku \ref{fig:class_distribution}, zbiór danych jest niezbal
 % =====================================================
 \section{Zastosowane metody}
 
-W celu oceny różnych sposobów reprezentacji tekstu oraz klasyfikacji emocji przeprowadzono eksperymenty z wykorzystaniem czterech podejść opartych na nowoczesnych metodach przetwarzania języka naturalnego. Zastosowane modele różniły się zarówno sposobem reprezentacji tweetów, jak i architekturą klasyfikatora.
+W celu oceny różnych sposobów reprezentacji tekstu oraz klasyfikacji emocji przeprowadzono eksperymenty z wykorzystaniem pięciu podejść opartych na nowoczesnych metodach przetwarzania języka naturalnego. Zastosowane modele różniły się zarówno sposobem reprezentacji tweetów, jak i architekturą klasyfikatora.
 
 \begin{table}[H]
 \centering
 \caption{Porównanie zastosowanych podejść.}
-\label{tab}
+\label{tab:models}
 \begin{tabular}{lll}
 \toprule
-Model & Reprezentacja tekstu & Klasyfikator \\
+Model & Reprezentacja & Klasyfikator \\
 \midrule
-DistilBERT + MLP & embedding CLS (768) & Residual MLP \\
-SBERT + MLP & embedding zdania (384) & Residual MLP \\
-GloVe + BiLSTM & sekwencja tokenów (200) & BiLSTM + Attention \\
-Zero-Shot BART & reprezentacja wewnętrzna BART & NLI (bez treningu) \\
-TF-IDF + Logistic Regression & TF-IDF & Logistic Regression \\
+DistilBERT + MLP & CLS (768) & Residual MLP \\
+DistilBERT FT & Tokeny + CLS (768) & DistilBERT (end-to-end) \\
+SBERT + MLP & Sentence Embedding (384) & Residual MLP \\
+GloVe + BiLSTM & Token Embeddings (200) & BiLSTM + Attention \\
+Zero-Shot BART & Reprezentacja BART & NLI \\
+TF-IDF + LR & TF-IDF & Logistic Regression \\
 \bottomrule
 \end{tabular}
 \end{table}
+\subsection{DistilBERT + MLP (frozen)}
 
-\subsection{DistilBERT + MLP}
-
-Pierwsze podejście wykorzystywało embeddingi generowane przez model DistilBERT. Dla każdego tweeta pobierano reprezentację tokenu CLS o wymiarze 768, która stanowiła zagregowany opis całej wypowiedzi.
+Pierwsze podejście wykorzystywało embeddingi generowane przez model DistilBERT. Dla każdego tweeta pobierano reprezentację tokenu CLS o wymiarze 768, która stanowiła zagregowany opis całej wypowiedzi. Wagi modelu DistilBERT pozostawały zamrożone podczas treningu — model pełnił wyłącznie rolę ekstrakatora cech.
 
 Embeddingi były następnie przekazywane do wielowarstwowej sieci neuronowej typu MLP (Multi-Layer Perceptron) wyposażonej w połączenia rezydualne (Residual Connections). Zastosowanie połączeń rezydualnych umożliwia stabilniejszy trening głębszych sieci poprzez ułatwienie propagacji gradientów oraz ograniczenie problemu zanikania gradientu.
 
-Architektura składała się z warstwy projekcji wejścia, trzech bloków rezydualnych wykorzystujących funkcję aktywacji GELU oraz końcowej warstwy klasyfikacyjnej przewidującej jedną z jedenastu klas emocjonalnych.
+Architektura składała się z warstwy projekcji wejścia, dwóch bloków rezydualnych wykorzystujących funkcję aktywacji GELU oraz końcowej warstwy klasyfikacyjnej przewidującej jedną z jedenastu klas emocjonalnych.
+
+\subsection{DistilBERT Fine-tuned (end-to-end)}
+
+Drugie podejście stanowiło rozszerzenie pierwszego — zamiast zamrożonych embeddingów przeprowadzono pełny fine-tuning modelu DistilBERT wraz z klasyfikatorem. Wagi transformera były aktualizowane podczas treningu, co pozwala modelowi dostosować reprezentacje do specyfiki klasyfikacji emocji w tweetach.
+
+Model przyjmował na wejściu tokeny (input\_ids oraz attention\_mask) i przekazywał reprezentację tokenu CLS do prostszej głowy klasyfikacyjnej: Dropout → Linear(768, 256) → GELU → Dropout → Linear(256, 11). Ze względu na znacznie wyższy koszt obliczeniowy fine-tuningu trening przeprowadzono na podzbiorze 12\,000 próbek przez 4 epoki z early stopping (patience = 2), z oddzielnymi wartościami learning rate dla warstw transformera ($3 \times 10^{-5}$) i głowy klasyfikacyjnej ($3 \times 10^{-4}$).
 
 \subsection{SBERT + MLP}
 
-Drugie podejście oparto na modelu Sentence-BERT (SBERT), wykorzystując wariant \texttt{all-MiniLM-L6-v2}. W przeciwieństwie do klasycznego BERT-a, model ten został zaprojektowany do generowania reprezentacji całych zdań i zachowywania podobieństwa semantycznego pomiędzy wypowiedziami.
+Trzecie podejście oparto na modelu Sentence-BERT (SBERT), wykorzystując wariant \texttt{all-MiniLM-L6-v2}. W przeciwieństwie do klasycznego BERT-a, model ten został zaprojektowany do generowania reprezentacji całych zdań i zachowywania podobieństwa semantycznego pomiędzy wypowiedziami.
 
 Każdy tweet reprezentowany był przez wektor o wymiarze 384. Następnie zastosowano tę samą architekturę klasyfikatora MLP z połączeniami rezydualnymi, co w przypadku modelu DistilBERT. Dzięki temu możliwe było bezpośrednie porównanie jakości obu rodzajów embeddingów przy identycznej architekturze klasyfikacyjnej.
 
 \subsection{GloVe + BiLSTM}
 
-Trzecie podejście wykorzystało klasyczne embeddingi GloVe wytrenowane na danych z serwisu Twitter (\texttt{glove-twitter-200}). W przeciwieństwie do modeli transformerowych embeddingi GloVe są statyczne i nie zależą od kontekstu występowania słowa.
+Czwarte podejście wykorzystało klasyczne embeddingi GloVe wytrenowane na danych z serwisu Twitter (\texttt{glove-twitter-200}). W przeciwieństwie do modeli transformerowych embeddingi GloVe są statyczne i nie zależą od kontekstu występowania słowa.
 
 Sekwencje tokenów były przetwarzane przez dwukierunkową sieć LSTM (BiLSTM), która analizowała tekst zarówno od początku do końca, jak i w kierunku przeciwnym. Pozwala to lepiej modelować zależności występujące w zdaniu.
 
@@ -181,7 +199,7 @@ Ostateczna reprezentacja uzyskana przez mechanizm uwagi była przekazywana do wa
 
 \subsection{Zero-Shot BART}
 
-Ostatnie podejście neuronowe stanowił model \texttt{facebook/bart-large-mnli} wykorzystany w trybie klasyfikacji zero-shot. W odróżnieniu od pozostałych metod model nie był trenowany na zbiorze tweetów Donalda Trumpa.
+Piąte podejście stanowił model \texttt{facebook/bart-large-mnli} wykorzystany w trybie klasyfikacji zero-shot. W odróżnieniu od pozostałych metod model nie był trenowany na zbiorze tweetów Donalda Trumpa.
 
 Klasyfikacja realizowana była poprzez mechanizm Natural Language Inference (NLI). Dla każdego tweeta model oceniał prawdopodobieństwo przypisania do każdej z badanych emocji na podstawie zdań opisujących poszczególne klasy.
 
@@ -208,17 +226,21 @@ Tabela \ref{tab:results} przedstawia wartości Accuracy oraz Macro F1 uzyskane p
 \centering
 \caption{Porównanie skuteczności modeli.}
 \label{tab:results}
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-Model & Accuracy & Macro F1 \\
+Model & Accuracy & Macro F1 & F1 Weighted \\
 \midrule
-DistilBERT + MLP & 0.267 & 0.197 \\
-SBERT + MLP & 0.329 & 0.257 \\
-GloVe + BiLSTM & 0.518 & 0.443 \\
-Zero-Shot BART & 0.132 & 0.121 \\
-TF-IDF + Logistic Regression & 0.650 & 0.480 \\
+DistilBERT + MLP (frozen) & 0.270 & 0.193 & 0.290 \\
+SBERT + MLP & 0.316 & 0.247 & 0.330 \\
+DistilBERT Fine-tuned & 0.503 & 0.431 & 0.520 \\
+GloVe + BiLSTM & 0.509 & 0.431 & 0.530 \\
+Zero-Shot BART & 0.132 & 0.121 & 0.140 \\
+TF-IDF + Logistic Regression* & 0.650 & 0.480 & 0.630 \\
 \bottomrule
 \end{tabular}
+\smallskip
+
+{\footnotesize * Ewaluacja na losowym podziale 80/20 zamiast stratyfikowanego 70/15/15 stosowanego przez pozostałe modele — wyniki nie są w pełni porównywalne.}
 \end{table}
 
 \begin{figure}[H]
@@ -228,9 +250,11 @@ TF-IDF + Logistic Regression & 0.650 & 0.480 \\
 \label{fig:model_comparison}
 \end{figure}
 
-Najwyższą skuteczność osiągnął model TF-IDF + Logistic Regression, uzyskując Accuracy równą 0.650 oraz Macro F1 na poziomie 0.480. Wśród modeli neuronowych najlepsze wyniki osiągnął model GloVe + BiLSTM z mechanizmem uwagi, który uzyskał Accuracy równą 0.518 oraz Macro F1 równą 0.443.
+Najwyższą skuteczność osiągnął model TF-IDF + Logistic Regression (Accuracy 0.650, Macro F1 0.480), jednak wynik ten należy interpretować z ostrożnością ze względu na różnice w procedurze ewaluacji opisane w przypisie do tabeli. Dodatkowo TF-IDF posiada strukturalną przewagę wynikającą ze sposobu etykietowania: etykiety NRC generowane są na podstawie obecności konkretnych słów w tekście, a model liniowy operuje na tych samych cechach leksykalnych.
 
-Model SBERT + MLP osiągnął lepsze wyniki niż DistilBERT + MLP, co sugeruje, że embeddingi projektowane do reprezentowania znaczenia całych zdań lepiej sprawdzają się w zadaniu klasyfikacji emocji. Najsłabsze rezultaty uzyskał model Zero-Shot BART, który nie był trenowany na analizowanym zbiorze danych i pełnił jedynie rolę punktu odniesienia.
+Wśród modeli neuronowych najlepsze wyniki osiągnęły ex aequo DistilBERT Fine-tuned oraz GloVe + BiLSTM, uzyskując Accuracy odpowiednio 0.503 i 0.509 oraz Macro F1 równą 0.431 dla obu modeli. Wynik DistilBERT Fine-tuned jest szczególnie istotny, ponieważ uzyskano go na podzbiorze zaledwie 12\,000 próbek przy 4 epokach treningu — co wskazuje na potencjał tego podejścia przy pełnym zbiorze danych.
+
+Modele oparte na zamrożonych embeddingach (DistilBERT + MLP, SBERT + MLP) wypadły wyraźnie słabiej, z Macro F1 poniżej 0.25. Najsłabsze rezultaty uzyskał model Zero-Shot BART, który nie był trenowany na analizowanym zbiorze i pełnił jedynie rolę punktu odniesienia.
 
 \subsection{Analiza skuteczności dla poszczególnych klas}
 
@@ -249,13 +273,15 @@ Najlepiej rozpoznawaną klasą była \textit{neutral}, dla której wszystkie mod
 
 Znacznie większe trudności sprawiały klasy \textit{disgusted}, \textit{surprised} oraz \textit{sarcastic}. Dla tych emocji wszystkie analizowane modele osiągały niskie wartości F1-score, często nieprzekraczające 0.2. Szczególnie trudna okazała się klasa \textit{disgusted}, która była jednocześnie jedną z najmniej licznych klas w całym zbiorze danych.
 
-Widoczna zależność pomiędzy liczebnością klasy a jakością klasyfikacji sugeruje, że niezbalansowany rozkład danych miał istotny wpływ na uzyskane wyniki. Jednocześnie niektóre emocje, takie jak \textit{sarcastic}, pozostają trudne do rozpoznania niezależnie od liczby przykładów, ponieważ ich poprawna identyfikacja często wymaga uwzględnienia szerszego kontekstu wypowiedzi.
+Widoczna zależność pomiędzy liczebnością klasy a jakością klasyfikacji sugeruje, że niezbalansowany charakter zbioru danych miał istotny wpływ na uzyskane wyniki. Warto zaznaczyć, że zastosowana stratyfikacja podczas podziału danych zapewniła jedynie zachowanie proporcji klas w zbiorach treningowym i testowym, nie eliminując problemu nierównowagi.
+
+Jednocześnie niektóre emocje, takie jak \textit{sarcastic}, pozostają trudne do rozpoznania niezależnie od liczby przykładów, ponieważ ich poprawna identyfikacja często wymaga uwzględnienia szerszego kontekstu wypowiedzi.
 
 Wynik ten jest zgodny z rozkładem danych przedstawionym wcześniej. Klasy posiadające niewielką liczbę przykładów treningowych były znacznie trudniejsze do nauczenia przez modele, co przełożyło się na niższe wartości Precision, Recall oraz F1-score.
 
 \subsection{Analiza błędów klasyfikacji}
 
-Aby lepiej zrozumieć źródła błędów klasyfikacyjnych, przeanalizowano macierz pomyłek dla najlepszego modelu neuronowego, tj. GloVe + BiLSTM.
+Aby lepiej zrozumieć źródła błędów klasyfikacyjnych, przeanalizowano macierze pomyłek dla dwóch najlepszych modeli neuronowych: GloVe + BiLSTM oraz DistilBERT Fine-tuned.
 
 \begin{figure}[H]
 \centering
@@ -264,13 +290,18 @@ Aby lepiej zrozumieć źródła błędów klasyfikacyjnych, przeanalizowano maci
 \label{fig:confusion_glove}
 \end{figure}
 
-Macierz pomyłek przedstawiona na rysunku \ref{fig:confusion_glove} pokazuje, że model najskuteczniej rozpoznaje klasy licznie reprezentowane w zbiorze danych, takie jak \textit{neutral}, \textit{joyful}, \textit{angry} oraz \textit{trusting}. Jednocześnie można zauważyć wyraźną tendencję do przewidywania klasy \textit{neutral}, która była najczęściej występującą kategorią w całym zbiorze danych.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/confusion_matrix_DistilBERT_FT.png}
+\caption{Macierz pomyłek dla modelu DistilBERT Fine-tuned.}
+\label{fig:confusion_ft}
+\end{figure}
 
-Analiza błędnych klasyfikacji wskazuje również na występowanie pomyłek pomiędzy emocjami o podobnym znaczeniu semantycznym. Przykładowo klasa \textit{angry} była często mylona z klasami \textit{fearful} oraz \textit{disgusted}, natomiast klasa \textit{trusting} była regularnie klasyfikowana jako \textit{joyful} lub \textit{neutral}. Takie błędy są częściowo zrozumiałe, ponieważ granice pomiędzy niektórymi emocjami nie są jednoznaczne nawet dla człowieka.
+Macierz pomyłek modelu GloVe + BiLSTM (rysunek \ref{fig:confusion_glove}) pokazuje, że model najskuteczniej rozpoznaje klasy licznie reprezentowane w zbiorze danych, takie jak \textit{neutral}, \textit{joyful}, \textit{angry} oraz \textit{trusting}. Klasy rzadkie (\textit{disgusted}, \textit{surprised}, \textit{sarcastic}) są rozpoznawane z wysokim recall, ale niską precision — model przewiduje je zbyt często i generuje dużo fałszywych alarmów.
 
-Największe problemy dotyczyły klas rzadkich, takich jak \textit{disgusted}, \textit{surprised} oraz \textit{sarcastic}. Dla tych kategorii liczba poprawnych predykcji była relatywnie niewielka, a wiele przykładów przypisywano do klas częstszych. Jest to typowy efekt niezbalansowanego zbioru danych, w którym model otrzymuje znacznie mniej przykładów umożliwiających nauczenie charakterystycznych wzorców dla klas mniejszościowych.
+DistilBERT Fine-tuned (rysunek \ref{fig:confusion_ft}) prezentuje jakościowo inny wzorzec błędów. Przekątna jest wyraźna dla wszystkich klas, w tym trudnych — \textit{disgusted} (14 poprawnych predykcji), \textit{sarcastic} (33) i \textit{surprised} (10). Popełniane pomyłki są semantycznie uzasadnione: \textit{trusting}~$\rightarrow$~\textit{joyful} (40 przypadków), \textit{angry}~$\rightarrow$~\textit{sad} (44) — model myli emocje bliskie znaczeniowo, a nie losowe klasy jak modele zamrożone.
 
-Wyniki potwierdzają, że głównym źródłem błędów była zarówno nierównowaga klas, jak i częściowe nakładanie się znaczeniowe niektórych emocji występujących w tweetach.
+Analiza obu macierzy wskazuje, że głównym źródłem błędów była zarówno nierównowaga klas, jak i semantyczne podobieństwo niektórych emocji, których granice nie są jednoznaczne nawet dla człowieka.
 
 % =====================================================
 % =====================================================
@@ -278,11 +309,14 @@ Wyniki potwierdzają, że głównym źródłem błędów była zarówno nierówn
 
 Jednym z celów projektu było zbadanie interpretowalności zastosowanych modeli. W tym celu wykorzystano metodę SHAP (SHapley Additive exPlanations), która pozwala określić wpływ poszczególnych cech wejściowych na decyzję klasyfikatora.
 
-Analizę przeprowadzono dla dwóch istotnie różnych podejść: modelu wykorzystującego embeddingi zdań (SBERT + MLP) oraz modelu TF--IDF + Logistic Regression. Pozwoliło to porównać nie tylko skuteczność modeli, ale również możliwość wyjaśnienia ich decyzji.
+Analizę przeprowadzono dla trzech istotnie różnych podejść: modeli opartych na zamrożonych embeddingach (DistilBERT~+~MLP oraz SBERT~+~MLP) oraz modelu TF-IDF~+~Logistic Regression. Pozwoliło to porównać nie tylko skuteczność modeli, lecz również możliwość wyjaśnienia ich decyzji w zależności od rodzaju reprezentacji tekstu.
 
-\subsection{Model SBERT + MLP}
+\subsection{Modele oparte na embeddingach: DistilBERT + MLP i SBERT + MLP}
 
-W przypadku modelu SBERT + MLP wejściem klasyfikatora był embedding zdania o wymiarze 384. Oznacza to, że SHAP analizował wpływ poszczególnych wymiarów reprezentacji wektorowej, a nie konkretnych słów występujących w tweecie.
+
+W przypadku obu modeli opartych na zamrożonych embeddingach wejściem klasyfikatora były wektory reprezentacji zdania — odpowiednio token CLS o wymiarze 768 dla DistilBERT oraz wektor zdania o wymiarze 384 dla SBERT. SHAP analizował wpływ poszczególnych wymiarów tych reprezentacji wektorowych, a nie konkretnych słów występujących w tweetach.
+
+Wykresy słupkowe średniego bezwzględnego wpływu poszczególnych wymiarów (dostępne w repozytorium jako \texttt{shap\_bar\_DistilBERT\_MLP.png} oraz \texttt{shap\_bar\_SBERT\_MLP.png}) pokazują, że różne klasy opierają się na różnych zestawach wymiarów, co sugeruje pewien stopień specjalizacji per klasa. Jednocześnie nakładanie się ważnych wymiarów między klasami — np. dim\_594 pojawia się jako istotny zarówno dla klas \textit{angry}, \textit{joyful}, jak i \textit{trusting} w modelu DistilBERT + MLP — wskazuje na brak wyraźnej separacji przestrzeni embeddingów dla zadania klasyfikacji emocji.
 
 \begin{figure}[H]
 \centering
@@ -291,7 +325,8 @@ W przypadku modelu SBERT + MLP wejściem klasyfikatora był embedding zdania o w
 \label{fig:shap_sbert}
 \end{figure}
 
-Jak pokazano na rysunku \ref{fig:shap_sbert}, SHAP identyfikuje grupę wymiarów embeddingu, które mają największy wpływ na przypisanie klasy \textit{angry}. Możliwe jest określenie względnego znaczenia poszczególnych cech, jednak ich interpretacja pozostaje utrudniona.
+Jak pokazano na rysunku \ref{fig:shap_sbert}, SHAP identyfikuje grupę wymiarów embeddingu, które mają największy wpływ na przypisanie klasy \textit{angry}. 
+Większość punktów skupia się wokół zera z długimi ogonami w obu kierunkach, co wskazuje na niestabilny i silnie próbkozależny wpływ poszczególnych wymiarów. Możliwe jest określenie względnego znaczenia poszczególnych cech, jednak ich interpretacja pozostaje utrudniona.
 
 Poszczególne wymiary embeddingu nie posiadają jednoznacznego znaczenia semantycznego. W przeciwieństwie do klasycznych cech tekstowych nie można stwierdzić, które konkretne słowa lub konstrukcje językowe odpowiadają za obserwowany wpływ. W rezultacie analiza SHAP pozwala ocenić, które fragmenty reprezentacji wektorowej są istotne dla modelu, ale nie wyjaśnia bezpośrednio mechanizmu podejmowania decyzji.
 
@@ -327,27 +362,23 @@ W przeciwieństwie do modelu SBERT możliwe było więc nie tylko wskazanie waż
 
 Analiza SHAP ujawniła wyraźną różnicę pomiędzy interpretowalnością badanych modeli.
 
-Model SBERT wykorzystywał złożoną reprezentację semantyczną tekstu, jednak wpływ poszczególnych wymiarów embeddingu był trudny do przełożenia na język naturalny. Z kolei model TF--IDF pozwalał bezpośrednio wskazać słowa odpowiedzialne za przypisanie danej emocji, dzięki czemu jego decyzje były znacznie bardziej przejrzyste.
+Modele DistilBERT + MLP oraz SBERT + MLP operowały na złożonych reprezentacjach semantycznych tekstu, jednak wpływ poszczególnych wymiarów embeddingu był trudny do przełożenia na język naturalny — niemożliwe było bezpośrednie wskazanie słów odpowiedzialnych za podjętą decyzję. Z kolei model TF-IDF pozwalał zidentyfikować konkretne słowa i bigramy wpływające na klasyfikację każdej z analizowanych emocji, a ich interpretacja była intuicyjna i zgodna z charakterem danej klasy.
 
-Warto zauważyć, że najważniejsze słowa wskazane przez SHAP były zgodne z intuicją oraz charakterem analizowanych emocji. Sugeruje to, że model nie opierał się na przypadkowych korelacjach, lecz rzeczywiście wykorzystywał sygnały językowe związane z treścią tweetów.
-
-Ostatecznie analiza SHAP pokazała, że wzrost złożoności reprezentacji tekstu prowadzi do spadku interpretowalności modelu. Jest to klasyczny kompromis pomiędzy możliwością wyjaśnienia decyzji a wykorzystaniem bardziej abstrakcyjnych reprezentacji semantycznych.
+Ostatecznie analiza SHAP potwierdziła klasyczny kompromis pomiędzy złożonością reprezentacji tekstu a interpretowalnością modelu: bogatsze semantycznie embeddingi oferują potencjalnie lepszy opis treści, lecz kosztem przejrzystości mechanizmu podejmowania decyzji.
 
 
 % =====================================================
 \section{Dyskusja wyników}
 
-\subsection{Dlaczego GloVe + BiLSTM osiągnął najlepsze wyniki wśród modeli neuronowych?}
+\subsection{Dlaczego modele sekwencyjne i fine-tuned przewyższają zamrożone embeddingi?}
 
-Jednym z najbardziej interesujących wyników eksperymentów jest wyraźna przewaga modelu GloVe + BiLSTM nad modelami wykorzystującymi embeddingi transformerowe. Jak pokazano w tabeli \ref{tab:results}, model ten osiągnął Accuracy równą 0.518, podczas gdy DistilBERT + MLP uzyskał jedynie 0.267.
+Jednym z najbardziej interesujących wyników eksperymentów jest wyraźna przewaga modeli GloVe + BiLSTM (Accuracy 0.509) oraz DistilBERT Fine-tuned (Accuracy 0.503) nad modelami wykorzystującymi zamrożone embeddingi transformerowe (DistilBERT + MLP frozen: 0.270, SBERT + MLP: 0.316).
 
-Na pierwszy rzut oka wynik ten może wydawać się zaskakujący. DistilBERT jest znacznie bardziej zaawansowanym modelem językowym niż klasyczne embeddingi GloVe, jednak w przeprowadzonym eksperymencie wykorzystano jedynie gotowy embedding CLS przekazywany następnie do klasyfikatora MLP. W takiej konfiguracji model operuje na pojedynczym wektorze reprezentującym cały tweet i nie wykorzystuje informacji o kolejności słów.
+Modele zamrożone operują na reprezentacjach CLS optymalizowanych pod inne zadania — maskowane modelowanie języka (MLM) dla DistilBERT oraz podobieństwo semantyczne zdań dla SBERT — a nie klasyfikację emocji w nieformalnych tekstach twitterowych. Bogatsza wymiarowość przestrzeni embeddingów nie kompensuje tego niedopasowania dziedzinowego.
 
-Model GloVe + BiLSTM działał w odmienny sposób. BiLSTM przetwarzał pełną sekwencję tokenów, dzięki czemu mógł modelować lokalne zależności pomiędzy słowami. Dodatkowo zastosowany mechanizm Attention pozwalał koncentrować się na fragmentach wypowiedzi najbardziej istotnych dla rozpoznawanej emocji.
+GloVe + BiLSTM uzyskuje wysoką skuteczność z dwóch niezależnych powodów. Embeddingi \texttt{glove-twitter-200} wytrenowane na korpusie tweetów naturalnie kodują skróty, emotikony i nieformalny rejestr językowy charakterystyczny dla badanego zbioru. Architektura BiLSTM z mechanizmem addytywnej uwagi zachowuje lokalny kontekst sekwencyjny — model przypisuje zróżnicowane wagi poszczególnym tokenom zamiast operować na jednym zagregowanym wektorze.
 
-Istotnym czynnikiem mogła być również domena danych wykorzystanych podczas uczenia embeddingów. Model \texttt{glove-twitter-200} został wytrenowany bezpośrednio na tweetach, przez co lepiej odwzorowuje charakterystyczny język mediów społecznościowych, obejmujący skróty, niestandardową interpunkcję czy częste użycie wielkich liter. Analizowane tweety są znacznie bliższe temu środowisku niż tekstom wykorzystywanym podczas trenowania DistilBERT.
-
-Wyniki sugerują więc, że w analizowanym zadaniu większe znaczenie miało dopasowanie reprezentacji do domeny oraz możliwość modelowania sekwencji niż sama złożoność modelu językowego.
+DistilBERT Fine-tuned osiąga porównywalny wynik inną drogą — poprzez odblokowanie wag transformera i dostosowanie reprezentacji CLS do zadania klasyfikacji emocji w trakcie treningu. Wynik ten uzyskano na podzbiorze 12\,000 próbek przy zaledwie 4 epokach, co wskazuje że przy pełnym zbiorze i dłuższym treningu podejście to miałoby potencjał do dalszej poprawy.
 
 \subsection{Dlaczego model Zero-Shot BART osiągnął tak słabe wyniki?}
 
@@ -363,13 +394,11 @@ Wyniki pokazują, że mimo dużych możliwości współczesnych modeli językowy
 
 Analiza wartości F1-score dla poszczególnych klas (rysunek \ref{fig:f1_per_class}) pokazuje, że poziom trudności klasyfikacji był bardzo nierównomierny.
 
-Najlepiej rozpoznawaną klasą była \textit{neutral}, dla której średni F1-score wyniósł około 0.46. Relatywnie wysokie wyniki osiągano również dla klas \textit{joyful} oraz \textit{patriotic}. Wspólną cechą tych kategorii jest występowanie charakterystycznego słownictwa, które modele mogły stosunkowo łatwo powiązać z konkretną etykietą.
+Najlepiej rozpoznawaną klasą była \textit{neutral}, dla której wszystkie modele osiągały relatywnie wysokie wartości F1-score. Dobre wyniki uzyskano również dla klas \textit{joyful} oraz \textit{enthusiastic}. Emocje te charakteryzują się stosunkowo wyraźnym i powtarzalnym słownictwem, co ułatwia ich identyfikację.
 
-Znacznie większe trudności sprawiały klasy \textit{disgusted} (średni F1 = 0.09), \textit{surprised} (0.12) oraz \textit{sarcastic} (0.17). Wyniki te pozostawały niskie niezależnie od zastosowanej architektury.
+Widoczny jest wyraźny podział na dwie grupy modeli. DistilBERT Fine-tuned i GloVe + BiLSTM uzyskują akceptowalne F1 nawet dla klas trudnych: \textit{disgusted} odpowiednio 0.41 i 0.18, \textit{sarcastic} 0.36 i 0.28. Modele zamrożone (DistilBERT + MLP, SBERT + MLP) praktycznie nie rozpoznają tych klas, uzyskując F1 poniżej 0.10.
 
-W przypadku klas \textit{disgusted} i \textit{surprised} istotnym problemem była niewielka liczba przykładów treningowych. Jak pokazano wcześniej na rysunkach \ref{fig:class_distribution} oraz \ref{fig:class_distribution_per}, klasy te stanowiły około 1% całego zbioru danych. Tak mała reprezentacja utrudnia modelom nauczenie stabilnych wzorców klasyfikacyjnych.
-
-Szczególnym przypadkiem pozostaje sarkazm. W przeciwieństwie do większości emocji jego identyfikacja często wymaga wiedzy o kontekście wypowiedzi lub intencji autora. Informacje te nie były dostępne dla analizowanych modeli, dlatego rozpoznawanie sarkazmu okazało się trudne niezależnie od wykorzystanej reprezentacji tekstu.
+Klasa \textit{sarcastic} pozostaje trudna pomimo wyższej liczebności niż \textit{disgusted}. Etykiety sarcastic generowane są przez heurystykę opartą na negacji i analizie VADER, której modele operujące na gęstych embeddingach nie odtwarzają równie skutecznie co TF-IDF + Logistic Regression działający bezpośrednio na słowach.
 
 \subsection{Ograniczenia przeprowadzonych eksperymentów}
 
